@@ -1,4 +1,4 @@
-// relay-server.js — Node.js WebSocket Relay
+// relay-server.js — Node.js WebSocket Relay (Dual Board Version)
 const WebSocket = require('ws');
 const http = require('http');
 
@@ -11,10 +11,10 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocket.Server({ server });
 
-// เก็บ client 3 ประเภท
-let camClient    = null; // ESP32 ตัวส่งภาพ
-let audioClient  = null; // ESP32 ตัวเสียง+มอเตอร์
-let webappClient = null; // Browser
+// ⚠️ ขยายที่นั่งให้รองรับ 3 ส่วน
+let camClient    = null; // สำหรับ ESP32 ตัวกล้อง
+let audioClient  = null; // สำหรับ ESP32 ตัวเสียง/มอเตอร์
+let webappClient = null; // สำหรับหน้าเว็บ/มือถือ
 
 function isAlive(ws) {
     return ws && ws.readyState === WebSocket.OPEN;
@@ -27,13 +27,14 @@ wss.on('connection', (ws, req) => {
 
     console.log(`[+] ${type.toUpperCase()} connected from ${ip}`);
 
+    // แยกที่นั่งให้ชัดเจน ใครมานั่งตรงไหน
     if (type === 'robot_cam') {
         if (isAlive(camClient)) camClient.terminate();
         camClient = ws;
     } else if (type === 'robot_audio') {
         if (isAlive(audioClient)) audioClient.terminate();
         audioClient = ws;
-        if (isAlive(webappClient)) webappClient.send('ROBOT_PING'); // แจ้งเว็บว่าหุ่นออนไลน์
+        if (isAlive(webappClient)) webappClient.send('ROBOT_PING');
     } else {
         if (isAlive(webappClient)) webappClient.terminate();
         webappClient = ws;
@@ -41,13 +42,13 @@ wss.on('connection', (ws, req) => {
 
     ws.on('message', (data, isBinary) => {
         if (type === 'robot_cam') {
-            // ภาพจากกล้อง -> ส่งให้เว็บ
+            // ภาพจากกล้อง -> ส่งตรงให้เว็บ
             if (isAlive(webappClient) && isBinary) {
                 webappClient.send(data, { binary: true });
             }
         } 
         else if (type === 'robot_audio') {
-            // เสียงจากไมค์หุ่น -> ส่งให้เว็บ
+            // ข้อมูลจากตัวเสียง -> ส่งให้เว็บ
             if (!isAlive(webappClient)) return;
             if (isBinary) {
                 webappClient.send(data, { binary: true });
@@ -58,13 +59,11 @@ wss.on('connection', (ws, req) => {
             }
         } 
         else {
-            // คำสั่งจากเว็บ -> ส่งให้หุ่น
+            // ข้อมูลจากเว็บ -> ส่งให้หุ่นยนต์ตัวเสียง/มอเตอร์
             if (!isAlive(audioClient)) return;
             if (isBinary) {
-                // เสียงพูดจากเว็บ -> ส่งเข้าลำโพง (ESP Audio)
                 audioClient.send(data, { binary: true });
             } else {
-                // คำสั่งมอเตอร์ -> ส่งเข้า ESP Audio
                 audioClient.send(data.toString());
             }
         }
@@ -82,6 +81,7 @@ wss.on('connection', (ws, req) => {
 
     ws.on('error', (err) => console.error(`[!] ${type} error:`, err.message));
 
+    // ระบบตรวจจับการหลุด (Heartbeat)
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
 });
