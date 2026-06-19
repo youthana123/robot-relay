@@ -11,10 +11,9 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocket.Server({ server });
 
-// ⚠️ ขยายที่นั่งให้รองรับ 3 ส่วน
-let camClient    = null; // สำหรับ ESP32 ตัวกล้อง
-let audioClient  = null; // สำหรับ ESP32 ตัวเสียง/มอเตอร์
-let webappClient = null; // สำหรับหน้าเว็บ/มือถือ
+let camClient    = null; 
+let audioClient  = null; 
+let webappClient = null; 
 
 function isAlive(ws) {
     return ws && ws.readyState === WebSocket.OPEN;
@@ -27,7 +26,6 @@ wss.on('connection', (ws, req) => {
 
     console.log(`[+] ${type.toUpperCase()} connected from ${ip}`);
 
-    // แยกที่นั่งให้ชัดเจน ใครมานั่งตรงไหน
     if (type === 'robot_cam') {
         if (isAlive(camClient)) camClient.terminate();
         camClient = ws;
@@ -41,31 +39,26 @@ wss.on('connection', (ws, req) => {
     }
 
     ws.on('message', (data, isBinary) => {
+        // ⚠️ หัวใจสำคัญ: ตรวจสอบ Binary แบบครอบจักรวาล ป้องกันข้อมูลพัง
+        const isBin = (isBinary !== undefined) ? isBinary : Buffer.isBuffer(data);
+
         if (type === 'robot_cam') {
-            // ภาพจากกล้อง -> ส่งตรงให้เว็บ
-            if (isAlive(webappClient) && isBinary) {
-                webappClient.send(data, { binary: true });
-            }
+            if (isAlive(webappClient)) webappClient.send(data, { binary: isBin });
         } 
         else if (type === 'robot_audio') {
-            // ข้อมูลจากตัวเสียง -> ส่งให้เว็บ
             if (!isAlive(webappClient)) return;
-            if (isBinary) {
-                webappClient.send(data, { binary: true });
+            if (!isBin && data.toString() === 'ROBOT_PING') {
+                webappClient.send('ROBOT_PING');
             } else {
-                const text = data.toString();
-                if (text === 'ROBOT_PING') webappClient.send('ROBOT_PING');
-                else webappClient.send(text);
+                webappClient.send(data, { binary: isBin });
             }
         } 
         else {
             // ข้อมูลจากเว็บ -> ส่งให้หุ่นยนต์ตัวเสียง/มอเตอร์
             if (!isAlive(audioClient)) return;
-            if (isBinary) {
-                audioClient.send(data, { binary: true });
-            } else {
-                audioClient.send(data.toString());
-            }
+            
+            // ⚠️ ส่งข้อมูลไปแบบตรงไปตรงมา ไม่บังคับแปลงเป็น String แล้ว
+            audioClient.send(data, { binary: isBin });
         }
     });
 
@@ -81,7 +74,6 @@ wss.on('connection', (ws, req) => {
 
     ws.on('error', (err) => console.error(`[!] ${type} error:`, err.message));
 
-    // ระบบตรวจจับการหลุด (Heartbeat)
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
 });
